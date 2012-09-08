@@ -20,7 +20,15 @@
 
 ;;; Commentary:
 
-;; This package will override any setting of the
+;; Add the following to your init file (usually ~/.emacs):
+;;
+;;     (eval-after-load 'compile '(require 'project-directory))
+;;
+;; or if you want:
+;;
+;;     (require 'project-directory)
+
+;; NOTE --- This package will override any setting of the
 ;; `compilation-process-setup-function' variable during compilation.
 ;; This will probably be fixed soon as I figure out a way to do
 ;; compilation-process-setup hooks.
