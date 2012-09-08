@@ -20,10 +20,10 @@
 
 ;;; Commentary:
 
-;; This will override any setting of the
-;; `compilation-process-setup-function' variable.  I'll fix this as
-;; soon as I can determine if there's a way to add compilation setup
-;; hooks (which might be soon, might be never).
+;; This package will override any setting of the
+;; `compilation-process-setup-function' variable during compilation.
+;; This will probably be fixed soon as I figure out a way to do
+;; compilation-process-setup hooks.
 
 ;;; Code:
 
@@ -62,15 +62,74 @@ containing, e.g., a Makefile."
     (if pathname
 	(file-name-directory pathname) nil)))
 
-(defun project-directory-setup-function ()
-  (cond
-   ((string-match "^\\([/A-Za-z0-9\\+\\,\\-\\.\\:\\=\\@\\_\\~]*/\\)?make\\b"
-		  compile-command)
-    (let ((proj-dir (project-directory-find "Makefile")))
-      (if proj-dir (setq default-directory proj-dir))))))
+;; We can't use compilation-mode-hook to set the directory where the
+;; compilation process executes, because currently the
+;; `compilation-start' function calls it in a context with
+;; `default-directory' as a dynamically scoped variable then starts
+;; the compilation process outside of that context.  However, we can
+;; fake it so the mode setter string (the -*- ... -*- stuff) contains
+;; the new directory.
 
-(setq compilation-process-setup-function 
-      'project-directory-setup-function)
+;; We also can't use compilation-start-hook to set the directory where
+;; the compilation process executes, because by the time its functions
+;; are executed, the process has already started.  :-(
+
+(defun project-directory-build-command-match (build-command
+					      command-string)
+  "Retruns a true value if the COMMAND-STRING argument is
+something that would eventually execute the BUILD-COMMAND
+argument (see below on how the matching works), or nil otherwise.
+
+Typically the COMMAND-STRING would be something like the value of
+`compile-command'.
+
+Typically the BUILD-COMMAND argument would be a command to invoke
+a build system, such as \"make\" or \"ant\".
+
+By \"something that would eventually execute BUILD-COMMAND\", we
+mean anything such as the following (we use the example of
+\"make\"):
+
+    make -k
+    ... <command> ; make <any arguments>
+    ... <command> & make <any arguments>
+    ... <command> && make <any arguments>
+    ... <command> <newline> make <any arguments>
+
+The whitespace before and after the ';' or '&' or '&&' (or
+newline) is optional."
+  (string-match
+   (concat "^\\(.*?\\(\\;|\\&\\&?|\n\\)\\s-\\)?"
+	   "\\([/A-Za-z0-9\\+\\,\\-\\.\\:\\=\\@\\_\\~]*\\)?"
+	   command-string "\\b")
+   command-string))
+
+(defun pd--compilation-start-hook ()
+  ;; And we shouldn't just straight up set the
+  ;; `compilation-process-setup-function' because the user may already
+  ;; have one set.  But until I fix this, this is literally the ONLY
+  ;; way we can change a directory for the compilation process:
+  (set (make-local-variable 'compilation-process-setup-function) 'pd--setup-function)
+  (cond
+   ((project-directory-build-command-match "make" compile-command)
+    (let ((proj-dir (project-directory-find "Makefile")))
+      (if proj-dir (cd proj-dir))))))
+
+(add-hook 'compilation-mode-hook 'pd--compilation-start-hook)
+
+(defun pd--setup-function ()
+  (cond
+   ((project-directory-build-command-match "make" compile-command)
+    (let ((proj-dir (project-directory-find "Makefile")))
+      (if proj-dir
+	  (progn
+	    (cd proj-dir)		;sets default-directory :-)
+	    (with-current-buffer (compilation-find-buffer)
+	      (save-excursion
+		(let ((inhibit-read-only t))
+		  (goto-char (point-max))
+		  (insert "** project-directory has changed the default directory to:\n"
+			  "** " default-directory "\n"))))))))))
 
 (provide 'project-directory)
 
